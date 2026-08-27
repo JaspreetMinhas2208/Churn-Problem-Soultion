@@ -1,0 +1,316 @@
+library(dplyr)
+library(haven)
+load_file<- "C:/Users/Jaspreet Singh/Desktop/Project/customer_base.sav"
+
+df <- read_sav(load_file) %>%
+  mutate(across(where(haven::is.labelled), ~ if(is.numeric(.)) . else as_factor(.)))
+
+summary(df)
+
+#############################################################
+####Checking and cleaning for missing data
+
+colSums(is.na(df))
+colMeans(is.na(df))
+
+df$received_cancel_date <- NULL
+df$customer_id <- NULL
+df$Contract_not_cancelled <- NULL
+df$industry <-NULL
+df <- na.omit(df)
+df <- df[, sapply(df, function(x) length(unique(x)) > 1)]
+summary(df)
+
+#############################################################
+####EDA
+
+table(df$Contract_extended)
+plot(table(df$Contract_extended))
+
+## Product Impact
+
+library(ggplot2)
+
+ggplot(df, aes(x = core_product, fill = Contract_extended)) +
+  geom_bar(position = "fill") +
+  labs(title = "Retention by Product", y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+## customer engagement
+
+ggplot(df, aes(x = Traffic_customercontacts_avg, fill = Contract_extended)) +
+  geom_histogram(bins = 30, alpha = 0.6, position = "identity")
+
+ggplot(df, aes(x = Contract_extended, y = Traffic_customercontacts_avg)) +
+  geom_boxplot()+ scale_y_continuous(limits= c(0,2000))
+
+## user behaviour
+
+ggplot(df, aes(x = Contract_extended, y = howoftendidthecompanysignin)) +
+  geom_boxplot()
+
+## CLV, CPC
+
+ggplot(df, aes(x = Contract_extended, y = clv)) +
+  geom_boxplot()
+
+ggplot(df,aes(x= Contract_extended, y=CPC)) +
+  geom_boxplot()
+
+## company size effect
+
+ggplot(df, aes(x= employee_count, fill = Contract_extended))+
+  geom_bar(position = "fill")
+
+## market
+
+ggplot(df, aes(x= market, fill = Contract_extended))+
+  geom_bar(position = "fill")
+
+## order intake
+
+ggplot(df, aes(x= OI, fill = Contract_extended))+
+  geom_histogram(bins = 30, alpha = 0.6, position = "identity")
+
+## no of pictures online
+
+ggplot(df, aes(x= no_of_picturesonline, fill = Contract_extended))+
+  geom_bar(position = "fill")
+
+## employee count
+
+ggplot(df, aes(x= employee_count, fill = Contract_extended))+
+  geom_bar(position = "fill")
+
+############################################################# train split data
+
+set.seed(123)
+
+train_index<- sample(1:nrow(df), 0.7* nrow(df))
+train<- df[train_index,]
+test<- df[-train_index,]
+train$Contract_extended <- ifelse(train$Contract_extended == "true", 1, 0)
+test$Contract_extended  <- ifelse(test$Contract_extended == "true", 1, 0)
+test$Contract_extended <- factor(test$Contract_extended, levels = c(0,1))
+
+############################################################# LASSO
+
+library(glmnet)
+
+y_train <- train$Contract_extended
+x_train <- model.matrix(Contract_extended ~ ., train)[, -1]
+
+set.seed(123)
+
+cv_lasso<- cv.glmnet(x= x_train,y= y_train, family= "binomial", alpha=1, nfolds = 10)
+plot(cv_lasso)
+
+coef_lasso<- coef(cv_lasso, s= "lambda.1se")
+selected<- rownames(coef_lasso)[coef_lasso[,1] != 0]
+selected<- setdiff(selected, "(intercept)")
+selected
+
+############################################################# logistic model
+
+log_model<- glm(Contract_extended ~ core_product+sales_area+cust_type+has_top_position+employee_count+
+                  Traffic_visits_with_IP_info_avg_month+how_often_did_customer_check_statistics+
+                  clv+InstallmentX, data = train, family = binomial)
+summary(log_model)
+
+###############################################
+results_v2<- glm(Contract_extended~clv+Traffic_visits_with_IP_info_avg_month+Traffic_customercontacts_avg+how_often_did_customer_check_statistics+howoftendidthecompanysignin+no_of_picturesonline
+                 +OI+cust_type_num,data = train,family = binomial("logit"))
+
+summary(results_v2)
+
+prod_predictions<- predict(results_v2, newdata = test, type = "response")
+pred_class<- ifelse(prod_predictions>0.5,1,0)
+pred_class <- factor(pred_class, levels = c(0,1))
+
+library(caret)
+confusionMatrix(pred_class,test$Contract_extended)
+
+prod_predictions<- predict(log_model, newdata = test, type = "response")
+pred_class<- ifelse(prod_predictions>0.5,1,0)
+pred_class <- factor(pred_class, levels = c(0,1))
+
+library(caret)
+confusionMatrix(pred_class,test$Contract_extended)
+
+library(pROC)
+roc_obj <- roc(test$Contract_extended, prod_predictions)
+
+plot(roc_obj, col = "blue", main = "ROC Curve - Logistic Regression")
+abline(a = 0, b = 1, lty = 2)
+auc(roc_obj)
+
+#############################################################tree model
+
+library(rpart)
+library(rpart.plot)
+
+tree_model <- rpart(Contract_extended ~ ., data = train, method = "class")
+rpart.plot(tree_model,tweak = 2.5)        
+
+tree_pred_prob <- predict(tree_model, newdata = test, type = "prob")[, 2]
+
+tree_pred <- ifelse(tree_pred_prob > 0.5, 1, 0)
+tree_pred <- as.factor(tree_pred)
+
+confusionMatrix(tree_pred, test$Contract_extended)
+
+tree_roc <- roc(test$Contract_extended, tree_pred_prob)
+plot(tree_roc, col = "red", main = "ROC Curve - Decision Tree")
+abline(a = 0, b = 1, lty = 2)
+
+auc(tree_roc)
+
+
+#############################################################
+df$cust_type_num<- ifelse(df$cust_type_num==1,0,1)
+df$cust_type_num <- factor(df$cust_type_num, levels = c(0,1), labels = c("old","new"))
+df$Contract_extended<- ifelse(df$Contract_extended=="true",1,0)
+df$Contract_extended<- factor(df$Contract_extended,levels = c(0,1))
+table(df$cust_type_num, df$Contract_extended)
+
+prop.table(table(df$cust_type, df$Contract_extended), 1)
+
+ggplot(df, aes(x = cust_type_num, fill = Contract_extended)) +
+  geom_bar(position = "fill") +
+  labs(
+    title = "Contract Extension Rate by Customer Type",
+    x = "Customer Type",
+    y = "Proportion"
+  )
+
+#############################################################split dataset
+
+df_old <- subset(df, cust_type_num == "old")
+df_new <- subset(df, cust_type_num == "new")
+
+
+#############################################################
+set.seed(123)
+
+train_idx_new <- sample(1:nrow(df_new), 0.7 * nrow(df_new))
+
+train_new <- df_new[train_idx_new, ]
+train_new <- train_new[, sapply(train_new, function(x) {
+  length(unique(x)) > 1
+})]
+test_new  <- df_new[-train_idx_new, ]
+test_new <- test_new[, names(train_new)]
+
+#############################################################
+####EDA
+
+table(df_new$Contract_extended)
+plot(table(df_new$Contract_extended))
+
+## Product Impact
+
+library(ggplot2)
+
+ggplot(df_new, aes(x = core_product, fill = Contract_extended)) +
+  geom_bar(position = "fill") +
+  labs(title = "Retention by Product", y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+## customer engagement
+
+ggplot(df_new, aes(x = Traffic_customercontacts_avg, fill = Contract_extended)) +
+  geom_histogram(bins = 30, alpha = 0.6, position = "identity")
+
+ggplot(df_new, aes(x = Contract_extended, y = Traffic_customercontacts_avg)) +
+  geom_boxplot()+ scale_y_continuous(limits= c(0,2000))
+
+## user behaviour
+
+ggplot(df_new, aes(x = Contract_extended, y = howoftendidthecompanysignin)) +
+  geom_boxplot()
+
+## CLV, CPC
+
+ggplot(df_new, aes(x = Contract_extended, y = clv)) +
+  geom_boxplot()
+
+ggplot(df_new,aes(x= Contract_extended, y=CPC)) +
+  geom_boxplot()
+
+## company size effect
+
+ggplot(df_new, aes(x= employee_count, fill = Contract_extended))+
+  geom_bar(position = "fill")
+
+## market
+
+ggplot(df_new, aes(x= market, fill = Contract_extended))+
+  geom_bar(position = "fill")
+
+
+#############################################################
+## New Logistic Model
+
+
+model_new <- glm(
+  Contract_extended ~ .,
+  data = train_new,
+  family = "binomial"
+)
+
+summary(model_new)
+
+pred_prob_new <- predict(model_new, test_new, type = "response")
+pred_class_new <- ifelse(pred_prob_new > 0.5, 1, 0)
+
+confusionMatrix(
+  factor(pred_class_new, levels = c(0,1)),
+  factor(test_new$Contract_extended, levels = c(0,1))
+)
+
+roc_obj_new <- roc(test_new$Contract_extended, pred_prob_new)
+
+plot(roc_obj_new, col = "blue", main = "ROC Curve - Logistic Regression")
+abline(a = 0, b = 1, lty = 2)
+auc(roc_obj_new)
+
+#############################################################
+## Decision Tree model
+
+tree_model_new<- rpart(Contract_extended~., data = train_new, method = "class")
+rpart.plot(tree_model_new, tweak = 2.5)
+
+tree_pred_prob_new<- predict(tree_model_new, newdata = test_new, type = "prob")[,2]
+tree_pred_class<- ifelse(tree_pred_prob_new>0.5,1,0)
+
+confusionMatrix(factor(tree_pred_class, levels = c(0,1)),factor(test_new$Contract_extended, levels = c(0,1)))
+
+tree_roc_new <- roc(test_new$Contract_extended, tree_pred_prob_new)
+plot(tree_roc_new, col = "red", main = "ROC Curve - Decision Tree")
+abline(a = 0, b = 1, lty = 2)
+
+auc(tree_roc_new)
+
+#############################################################
+## Random Forest model
+
+library(randomForest)
+
+set.seed(42)
+
+rf_model <- randomForest(Contract_extended ~ ., data = train_new, ntree = 200, mtry = 3, importance = TRUE)
+print(rf_model)
+
+rf_prob <- predict(rf_model, newdata = test_new,type = "prob")[, 2]
+rf_pred <- ifelse(rf_prob > 0.5, 1, 0)
+rf_pred <- as.factor(rf_pred)
+
+confusionMatrix(rf_pred, test_new$Contract_extended)
+
+rf_roc_new <- roc(test_new$Contract_extended, rf_prob)
+plot(rf_roc_new, col = "darkgreen", main = "ROC Curve - Random Forest")
+abline(a = 0, b = 1, lty = 2)
+auc(rf_roc_new)
+
+importance(rf_model)
+varImpPlot(rf_model)
