@@ -1,6 +1,7 @@
 library(dplyr)
 library(haven)
-load_file<- "C:/Users/Jaspreet Singh/Desktop/ISM/Semester 3/Regression model/Project/customer_base.sav"
+load_file<- "C:/Users/Jaspreet Singh/Desktop/Project/customer_base.sav"
+
 df <- read_sav(load_file) %>%
   mutate(across(where(haven::is.labelled), ~ if(is.numeric(.)) . else as_factor(.)))
 
@@ -41,7 +42,7 @@ ggplot(df, aes(x = Traffic_customercontacts_avg, fill = Contract_extended)) +
   geom_histogram(bins = 30, alpha = 0.6, position = "identity")
 
 ggplot(df, aes(x = Contract_extended, y = Traffic_customercontacts_avg)) +
-  geom_boxplot()
+  geom_boxplot()+ scale_y_continuous(limits= c(0,2000))
 
 ## user behaviour
 
@@ -64,6 +65,21 @@ ggplot(df, aes(x= employee_count, fill = Contract_extended))+
 ## market
 
 ggplot(df, aes(x= market, fill = Contract_extended))+
+  geom_bar(position = "fill")
+
+## order intake
+
+ggplot(df, aes(x= OI, fill = Contract_extended))+
+  geom_histogram(bins = 30, alpha = 0.6, position = "identity")
+
+## no of pictures online
+
+ggplot(df, aes(x= no_of_picturesonline, fill = Contract_extended))+
+  geom_bar(position = "fill")
+
+## employee count
+
+ggplot(df, aes(x= employee_count, fill = Contract_extended))+
   geom_bar(position = "fill")
 
 ############################################################# train split data
@@ -101,26 +117,12 @@ log_model<- glm(Contract_extended ~ core_product+sales_area+cust_type+has_top_po
                   clv+InstallmentX, data = train, family = binomial)
 summary(log_model)
 
-###############################################
-results_v2<- glm(Contract_extended~clv+Traffic_visits_with_IP_info_avg_month+Traffic_customercontacts_avg+how_often_did_customer_check_statistics+howoftendidthecompanysignin+no_of_picturesonline
-                 +OI+cust_type_num,data = train,family = binomial("logit"))
-
-summary(results_v2)
-
 prod_predictions<- predict(results_v2, newdata = test, type = "response")
 pred_class<- ifelse(prod_predictions>0.5,1,0)
 pred_class <- factor(pred_class, levels = c(0,1))
 
 library(caret)
 confusionMatrix(pred_class,test$Contract_extended)
-
-
-
-
-
-
-
-
 
 prod_predictions<- predict(log_model, newdata = test, type = "response")
 pred_class<- ifelse(prod_predictions>0.5,1,0)
@@ -136,7 +138,7 @@ plot(roc_obj, col = "blue", main = "ROC Curve - Logistic Regression")
 abline(a = 0, b = 1, lty = 2)
 auc(roc_obj)
 
-#############################################################tree model
+############################################################# Tree model
 
 library(rpart)
 library(rpart.plot)
@@ -175,15 +177,12 @@ ggplot(df, aes(x = cust_type_num, fill = Contract_extended)) +
     y = "Proportion"
   )
 
-#############################################################split dataset
+############################################################# split dataset
 
 df_old <- subset(df, cust_type_num == "old")
 df_new <- subset(df, cust_type_num == "new")
 
-
-#############################################################
 set.seed(123)
-
 train_idx_new <- sample(1:nrow(df_new), 0.7 * nrow(df_new))
 
 train_new <- df_new[train_idx_new, ]
@@ -192,6 +191,53 @@ train_new <- train_new[, sapply(train_new, function(x) {
 })]
 test_new  <- df_new[-train_idx_new, ]
 test_new <- test_new[, names(train_new)]
+
+#############################################################
+####EDA
+
+table(df_new$Contract_extended)
+plot(table(df_new$Contract_extended))
+
+## Product Impact
+
+library(ggplot2)
+
+ggplot(df_new, aes(x = core_product, fill = Contract_extended)) +
+  geom_bar(position = "fill") +
+  labs(title = "Retention by Product", y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+## customer engagement
+
+ggplot(df_new, aes(x = Traffic_customercontacts_avg, fill = Contract_extended)) +
+  geom_histogram(bins = 30, alpha = 0.6, position = "identity")
+
+ggplot(df_new, aes(x = Contract_extended, y = Traffic_customercontacts_avg)) +
+  geom_boxplot()+ scale_y_continuous(limits= c(0,2000))
+
+## user behaviour
+
+ggplot(df_new, aes(x = Contract_extended, y = howoftendidthecompanysignin)) +
+  geom_boxplot()
+
+## CLV, CPC
+
+ggplot(df_new, aes(x = Contract_extended, y = clv)) +
+  geom_boxplot()
+
+ggplot(df_new,aes(x= Contract_extended, y=CPC)) +
+  geom_boxplot()
+
+## company size effect
+
+ggplot(df_new, aes(x= employee_count, fill = Contract_extended))+
+  geom_bar(position = "fill")
+
+## market
+
+ggplot(df_new, aes(x= market, fill = Contract_extended))+
+  geom_bar(position = "fill")
+
 
 #############################################################
 ## New Logistic Model
