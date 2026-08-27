@@ -78,6 +78,13 @@ Overall, the analysis indicates that while engagement-related metrics provide so
 ### Models Used:
 - Logistic Regression  
 - Decision Tree  
+- **LASSO (Feature Selection)**  
+---
+## 🔍 LASSO (Regularization & Feature Selection)
+
+LASSO regression was applied using cross-validation to reduce high-dimensional feature space and automatically select important variables. By the process only a small subset of variables was selected and the selected variables were not strongly consistent across models. Many coefficients shrank to zero. 
+
+The key insight is that there is no strong set of dominant predictors driving churn in this dataset. This was an early signal that the problem is complex and the dataset may be missing key explanatory variables.
 
 ---
 
@@ -95,6 +102,11 @@ The initial models achieved high overall accuracy; however, they provided little
 # Phase 3 — Customer Segmentation
 
 A decision was taken at this point, to divide the customer base between new and old customers, since the retention rate between was different i.e. 80% in existing customers while 60% in new customers. It was also understood from a logical reasoning stand point that the requirements for the new customers is different from the already existing customers. New customers are likely more prone to churn then existing ones as highlighted by the evidence above. Segmenting the data in this way enables more targeted analysis and improves the potential to derive meaningful, actionable insights.
+
+### Models Used:
+- Logistic Regression  
+- Decision Tree
+- Random Forest
 
 ##  Model Results
 
